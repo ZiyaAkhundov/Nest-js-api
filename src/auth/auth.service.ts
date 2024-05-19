@@ -2,9 +2,10 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { AuthDto } from './dto';
+import { SignInDto, SignUpDto } from './dto';
 import * as argon from 'argon2';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import { Response } from 'express';
 
 @Injectable({})
 export class AuthService {
@@ -13,7 +14,7 @@ export class AuthService {
     private jwt: JwtService,
     private config: ConfigService,
   ) {}
-  async signup(dto: AuthDto) {
+  async signup(dto: SignUpDto) {
     // generate the password hash
     const hash = await argon.hash(dto.password);
 
@@ -22,12 +23,9 @@ export class AuthService {
       const user = await this.prisma.user.create({
         data: {
           email: dto.email,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
           hash,
-        },
-        select: {
-          id: true,
-          email: true,
-          createdAt: true,
         },
       });
       //return the saved user
@@ -41,7 +39,7 @@ export class AuthService {
     }
   }
 
-  async signin(dto: AuthDto) {
+  async signin(dto: SignInDto, res: Response) {
     // find the user by email
     const user = await this.prisma.user.findUnique({
       where: {
@@ -58,13 +56,15 @@ export class AuthService {
     if (!pwMatches) throw new ForbiddenException('Credentials is incorrect');
 
     //send back the user
-    return this.signToken(user.id, user.email);
+    const token = await this.signToken(user.id, user.email);
+
+    res.cookie('jwt', token, { httpOnly: true });
+    return {
+      statusCode: 200,
+    };
   }
 
-  async signToken(
-    userId: number,
-    email: string,
-  ): Promise<{ access_token: string }> {
+  async signToken(userId: number, email: string): Promise<string> {
     const payload = {
       sub: userId,
       email,
@@ -76,8 +76,6 @@ export class AuthService {
       secret: secret,
     });
 
-    return {
-      access_token: token,
-    };
+    return token;
   }
 }
